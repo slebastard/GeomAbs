@@ -47,7 +47,9 @@ def generate_a_drawing(figsize, U, V, noise=0.0):
 	ax.fill(U, V, "k")
 	fig.canvas.draw()
 	imdata = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)[::3].astype(np.float32)
-	imdata = imdata + noise * np.random.random(imdata.size)
+	imdata = 255 - imdata + noise * np.random.random(imdata.size)
+	imdata[imdata < 0] = 0
+	imdata[imdata > 255] = 255
 	plt.close(fig)
 	return imdata
 
@@ -56,30 +58,47 @@ def generate_a_rectangle(width_in_pixels= None, noise=0.0, free_location=False):
 	U = np.zeros(4)
 	V = np.zeros(4)
 	if free_location:
-		corners = np.random.random(4)
+		corners = np.random.random(4) * figsize
 		top = max(corners[0], corners[1])
 		bottom = min(corners[0], corners[1])
 		left = min(corners[2], corners[3])
 		right = max(corners[2], corners[3])
+		
+		theta = np.pi*np.random.random()
+		mid_len = (right+left)/2
+		mid_hei = (top+bottom)/2
+		length = right - left 
+		height = top - bottom
+		
+		U[0] = mid_len - (length/2) - np.sqrt(length*length + height*height)*np.sin(theta)/2
+		U[1] = mid_len + (length/2) - np.sqrt(length*length + height*height)*np.sin(theta)/2
+		U[2] = mid_len + (length/2) + np.sqrt(length*length + height*height)*np.sin(theta)/2
+		U[3] = mid_len - (length/2) + np.sqrt(length*length + height*height)*np.sin(theta)/2
+
+		V[0] = mid_hei + (height/2) - np.sqrt(length*length + height*height)*np.sin(theta)/2
+		V[1] = mid_hei + (height/2) + np.sqrt(length*length + height*height)*np.sin(theta)/2
+		V[2] = mid_hei - (height/2) + np.sqrt(length*length + height*height)*np.sin(theta)/2
+		V[3] = mid_hei - (height/2) - np.sqrt(length*length + height*height)*np.sin(theta)/2
+
 	else:
 		side = (0.3 + 0.7 * np.random.random()) * figsize
 		top = figsize/2 + side/2
 		bottom = figsize/2 - side/2
 		left = bottom
 		right = top
-	U[0] = U[1] = top
-	U[2] = U[3] = bottom
-	V[0] = V[3] = left
-	V[1] = V[2] = right
+		U[0] = U[1] = top
+		U[2] = U[3] = bottom
+		V[0] = V[3] = left
+		V[1] = V[2] = right
 	return generate_a_drawing(figsize, U, V, noise)
 
 def generate_a_disk(width_in_pixels= None, noise=0.0, free_location=False):
 	figsize = width_in_pixels / my_dpi
 	if free_location:
-		center = np.random.random(2)
+		center = (0.1 + 0.8*np.random.random(2)) * figsize/2
 	else:
 		center = (figsize/2, figsize/2)
-	radius = (0.3 + 0.7 * np.random.random()) * figsize/2
+	radius = (0.2 + 0.5 * np.random.random()) * figsize/2
 	N = 50
 	U = np.zeros(N)
 	V = np.zeros(N)
@@ -93,8 +112,8 @@ def generate_a_disk(width_in_pixels= None, noise=0.0, free_location=False):
 def generate_a_triangle(width_in_pixels= None, noise=0.0, free_location=False):
 	figsize = width_in_pixels / my_dpi
 	if free_location:
-		U = np.random.random(3)
-		V = np.random.random(3)
+		U = np.random.random(3)*figsize/2
+		V = np.random.random(3)*figsize/2
 	else:
 		size = (0.3 + 0.7 * np.random.random())*figsize/2
 		middle = figsize/2
@@ -128,19 +147,22 @@ def generate_nclasses_dataset(nb_samples, nb_classes, width_in_pixels, noise=0.0
 	"""
 	assert nb_classes > 0
 	class_templates = []
-	for _ in range(nb_classes):
+	for i in range(nb_classes):
 		category = np.random.randint(3)
 		if category == 0:
+			print('Class {0:d} is a rectangle'.format(i))
 			class_templates.append(
-				generate_a_rectangle(width_in_pixels, free_location=free_location).reshape((width_in_pixels,width_in_pixels))
+				generate_a_rectangle(width_in_pixels, noise=noise, free_location=free_location).reshape((width_in_pixels,width_in_pixels))
 				)
-		elif category == 1: 
+		elif category == 1:
+			print('Class {0:d} is a disk'.format(i))
 			class_templates.append(
-				generate_a_disk(width_in_pixels, free_location=free_location).reshape((width_in_pixels,width_in_pixels))
+				generate_a_disk(width_in_pixels, noise=noise, free_location=free_location).reshape((width_in_pixels,width_in_pixels))
 				)
 		else:
+			print('Class {0:d} is a triangle'.format(i))
 			class_templates.append(
-				generate_a_triangle(width_in_pixels, free_location=free_location).reshape((width_in_pixels,width_in_pixels))
+				generate_a_triangle(width_in_pixels, noise=noise, free_location=free_location).reshape((width_in_pixels,width_in_pixels))
 				)
 	
 	im_size = width_in_pixels*width_in_pixels
@@ -391,7 +413,7 @@ class ImageDataset:
 		"""
 		y_train_in_set = []
 		for lbl_set in dich_set[:-1]:
-			y_train_in_set.append(np.isin(self.train['y'], lbl_set))
+			y_train_in_set.append(np.isin(self.train['y'], list(lbl_set)))
 
 		y_train_in_set.append(np.logical_not(np.any(y_train_in_set, 0)))
 
@@ -403,7 +425,7 @@ class ImageDataset:
 
 		y_test_in_set = []
 		for lbl_set in dich_set[:-1]:
-			y_test_in_set.append(np.isin(self.test['y'], lbl_set))
+			y_test_in_set.append(np.isin(self.test['y'], list(lbl_set)))
 
 		y_test_in_set.append(np.logical_not(np.any(y_test_in_set, 0)))
 
@@ -416,7 +438,7 @@ class ImageDataset:
 		if hasattr(self, 'gnr'):
 			y_gnr_in_set = []
 			for lbl_set in dich_set[:-1]:
-				y_gnr_in_set.append(np.isin(self.gnr['y'], lbl_set))
+				y_gnr_in_set.append(np.isin(self.gnr['y'], list(lbl_set)))
 
 			y_gnr_in_set.append(np.logical_not(np.any(y_gnr_in_set, 0)))
 
